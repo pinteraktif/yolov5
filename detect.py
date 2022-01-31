@@ -10,7 +10,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 import cv2
 import numpy as np
@@ -43,13 +43,6 @@ from utils.general import (
 )
 from utils.plots import Annotator, colors
 from utils.torch_utils import load_classifier, select_device, time_sync
-
-CFG_THREAD_COUNT = int(os.getenv("CFG_THREAD_COUNT", "1"))
-CFG_MODEL = os.getenv("CFG_MODEL", "yolov5n.pt")
-CFG_CONF_THRESHOLD = float(os.getenv("CFG_CONF_THRESHOLD", "0.5"))
-CFG_IOU_THRESHOLD = float(os.getenv("CFG_IOU_THRESHOLD", "0.45"))
-CFG_DEVICE = "cpu"
-CFG_HUMAN_CLASS = [0]
 
 
 def letterbox(
@@ -95,19 +88,46 @@ def letterbox(
     return im, ratio, (dw, dh)
 
 
+class HumanDetectorConfig:
+    thread_count: int
+    model_name: str
+    conf_threshold: float
+    iou_threshold: float
+    device_name: str
+    human_classes: List[int]
+
+    def __init__(
+        self,
+        thread_count: int = 1,
+        model_name: str = "yolov5n.pt",
+        conf_threshold: float = 0.55,
+        iou_threshold: float = 0.45,
+        device_name: str = "cpu",
+        human_classes: List[int] = [0],
+    ) -> None:
+        self.thread_count = thread_count
+        self.model_name = model_name
+        self.conf_threshold = conf_threshold
+        self.iou_threshold = iou_threshold
+        self.device_name = device_name
+        self.human_classes = human_classes
+
+
 class HumanDetector:
     device: torch.device
     stride: int
     model: Any
     image_size: int
+    config: HumanDetectorConfig
 
-    def __init__(self) -> None:
+    def __init__(self, config: HumanDetectorConfig = HumanDetectorConfig()) -> None:
         set_logging()
-        torch.set_num_threads(CFG_THREAD_COUNT)
-        self.device = select_device(CFG_DEVICE)
-        self.model = attempt_load(CFG_MODEL, map_location=self.device)
+        torch.set_num_threads(config.thread_count)
+        self.device = select_device(config.device_name)
+        self.model = attempt_load(config.model_name, map_location=self.device)
         self.stride = int(self.model.stride.max())
         self.image_size = check_img_size(640, s=self.stride)
+        self.config = config
 
     @torch.no_grad()
     def detect_human(self, video_frame: np.ndarray) -> bool:
@@ -120,7 +140,10 @@ class HumanDetector:
             tensor_frame = tensor_frame[None, ...]
         prediction = self.model(tensor_frame, augment=False, visualize=False)[0]
         prediction = non_max_suppression(
-            prediction, CFG_CONF_THRESHOLD, CFG_IOU_THRESHOLD, CFG_HUMAN_CLASS
+            prediction,
+            self.config.conf_threshold,
+            self.config.iou_threshold,
+            self.config.human_classes,
         )
         return len(prediction[0]) > 0
 
